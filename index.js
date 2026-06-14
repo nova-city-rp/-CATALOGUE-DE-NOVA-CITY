@@ -75,7 +75,7 @@ const categories = {
 const commands = [
   new SlashCommandBuilder().setName("cartes").setDescription("Menu cartes"),
   new SlashCommandBuilder().setName("mes-cartes").setDescription("Tes cartes"),
-  new SlashCommandBuilder().setName("stats-cartes").setDescription("Stats"),
+  new SlashCommandBuilder().setName("stats-cartes").setDescription("Stats globales"),
 
   new SlashCommandBuilder()
     .setName("catalogueglobale")
@@ -89,7 +89,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("ajouter-carte")
-    .setDescription("Ajouter carte (ADMIN)")
+    .setDescription("Ajouter une carte (ADMIN)")
     .addStringOption(o => o.setName("categorie").setRequired(true))
     .addStringOption(o => o.setName("id").setRequired(true))
     .addStringOption(o => o.setName("nom").setRequired(true))
@@ -97,18 +97,24 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("donner-carte")
-    .setDescription("Donner carte")
+    .setDescription("Donner une carte à un utilisateur")
     .addUserOption(o => o.setName("utilisateur").setRequired(true))
     .addStringOption(o => o.setName("id").setRequired(true)),
 ].map(c => c.toJSON());
 
-// ================= DEPLOY =================
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-(async () => {
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-  console.log("✅ Commands OK");
-})();
+// ================= DEPLOY & LOGIN =================
+client.once("ready", async () => {
+  console.log(`🤖 Bot connecté en tant que ${client.user.tag}`);
+  
+  // Déploiement des commandes une fois le bot en ligne et authentifié
+  try {
+    const rest = new REST({ version: "10" }).setToken(TOKEN);
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log("✅ Commandes Slash enregistrées avec succès !");
+  } catch (error) {
+    console.error("❌ Erreur lors de l'enregistrement des commandes :", error);
+  }
+});
 
 // ================= HELPERS =================
 function getUser(id) {
@@ -122,7 +128,7 @@ client.on("interactionCreate", async (interaction) => {
   try {
 
     // ===== MENU =====
-    if (interaction.commandName === "cartes") {
+    if (interaction.isChatInputCommand() && interaction.commandName === "cartes") {
       return interaction.reply({
         ephemeral: true,
         embeds: [new EmbedBuilder().setTitle("🎮 MENU CARTES").setColor(0x3498db)],
@@ -140,31 +146,41 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton()) {
 
       if (interaction.customId === "cat") {
+        // Limitation Discord de sécurité (Max 25 options dans un select menu)
+        const options = Object.keys(categories).slice(0, 25).map(c => ({
+          label: c.toUpperCase().replace("_", " "),
+          value: c
+        }));
+
         return interaction.reply({
           ephemeral: true,
+          content: "Sélectionnez une catégorie ci-dessous :",
           components: [
             new ActionRowBuilder().addComponents(
               new StringSelectMenuBuilder()
                 .setCustomId("cat_select")
-                .setPlaceholder("Catégorie")
-                .addOptions(Object.keys(categories).map(c => ({
-                  label: c,
-                  value: c
-                })))
+                .setPlaceholder("Choisissez une catégorie")
+                .addOptions(options)
             )
           ]
         });
       }
 
+      if (interaction.customId === "view") {
+        return interaction.reply({
+          content: "💡 Pour voir vos cartes détaillées, utilisez plutôt la commande `/mes-cartes` !",
+          ephemeral: true
+        });
+      }
+
       if (interaction.customId === "stats") {
         const total = Object.values(data).flat().length;
-
         return interaction.reply({
           ephemeral: true,
           embeds: [
             new EmbedBuilder()
               .setTitle("📊 Stats")
-              .setDescription(`Total cartes: **${total}**`)
+              .setDescription(`Total de cartes créées sur le bot: **${total}**`)
               .setColor(0x2ecc71)
           ]
         });
@@ -173,43 +189,46 @@ client.on("interactionCreate", async (interaction) => {
 
     // ===== CATALOGUE SIMPLE =====
     if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
-
       const cat = interaction.values[0];
       const cards = data[cat] || [];
 
       return interaction.update({
+        content: null,
         embeds: [
           new EmbedBuilder()
             .setTitle(`📁 ${cat.toUpperCase()}`)
+            .setColor(0x3498db)
             .setDescription(
               cards.length
                 ? cards.map(c => {
                     const r = rarityStyle[c.rarity] || rarityStyle.commun;
                     return `${r.emoji} **${c.id}** - ${c.nom}`;
                   }).join("\n")
-                : "Aucune carte"
+                : "Aucune carte dans cette catégorie."
             )
         ],
-        components: []
+        components: [] // Supprime le menu après sélection pour éviter les bugs
       });
     }
 
     // ===== GLOBAL CATALOGUE (GRID STYLE EMBED) =====
-    if (interaction.commandName === "catalogueglobale") {
-
+    if (interaction.isChatInputCommand() && interaction.commandName === "catalogueglobale") {
       const all = Object.values(data).flat();
+
+      if (all.length === 0) {
+        return interaction.reply({ content: "Aucune carte n'existe pour le moment.", ephemeral: true });
+      }
 
       const embed = new EmbedBuilder()
         .setTitle("🌍 CATALOGUE GLOBAL")
         .setColor(0x5865f2);
 
-      // grid style (max 25 fields Discord)
+      // Limite d'affichage de Discord à 25 champs maximum
       all.slice(0, 25).forEach(card => {
         const r = rarityStyle[card.rarity] || rarityStyle.commun;
-
         embed.addFields({
           name: `${r.emoji} ${card.id}`,
-          value: `**${card.nom}**\n${card.image}`,
+          value: `**Nom:** ${card.nom}\n[Lien Image](${card.image})`,
           inline: true
         });
       });
@@ -218,26 +237,27 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ===== RETIRER CARTE =====
-    if (interaction.commandName === "retirer-carte") {
-
+    if (interaction.isChatInputCommand() && interaction.commandName === "retirer-carte") {
       const user = interaction.options.getUser("utilisateur");
       const id = interaction.options.getString("id");
 
       const p = getUser(user.id);
+      
+      if (!p.cards.includes(id)) {
+        return interaction.reply({ content: `❌ Cet utilisateur ne possède pas la carte **${id}**.`, ephemeral: true });
+      }
 
       p.cards = p.cards.filter(c => c !== id);
-
       saveJSON("./players.json", players);
 
       return interaction.reply({
-        content: `🗑️ Carte retirée: ${id}`,
+        content: `🗑️ Carte **${id}** retirée avec succès de <@${user.id}>.`,
         ephemeral: true
       });
     }
 
     // ===== MES CARTES =====
-    if (interaction.commandName === "mes-cartes") {
-
+    if (interaction.isChatInputCommand() && interaction.commandName === "mes-cartes") {
       const p = getUser(interaction.user.id);
 
       return interaction.reply({
@@ -245,27 +265,31 @@ client.on("interactionCreate", async (interaction) => {
         embeds: [
           new EmbedBuilder()
             .setTitle("📚 Tes cartes")
-            .setDescription(p.cards.length ? p.cards.join("\n") : "Aucune carte")
+            .setColor(0x9b59b6)
+            .setDescription(p.cards.length ? p.cards.map(c => `• **${c}**`).join("\n") : "Encore aucune carte dans ta collection ! 😢")
         ]
       });
     }
 
     // ===== AJOUT =====
-    if (interaction.commandName === "ajouter-carte") {
-
+    if (interaction.isChatInputCommand() && interaction.commandName === "ajouter-carte") {
       if (!interaction.memberPermissions?.has("Administrator"))
-        return interaction.reply({ content: "❌ Admin only", ephemeral: true });
+        return interaction.reply({ content: "❌ Seuls les administrateurs peuvent faire cela.", ephemeral: true });
 
-      const cat = interaction.options.getString("categorie");
+      const cat = interaction.options.getString("categorie").toLowerCase();
       const id = interaction.options.getString("id");
       const nom = interaction.options.getString("nom");
       const image = interaction.options.getString("image");
+
+      if (!categories[cat]) {
+        return interaction.reply({ content: `❌ Cette catégorie n'existe pas. Choisi parmi : ${Object.keys(categories).join(', ')}`, ephemeral: true });
+      }
 
       if (!data[cat]) data[cat] = [];
 
       const exists = Object.values(data).flat().some(c => c.id === id);
       if (exists)
-        return interaction.reply({ content: "❌ ID déjà utilisé", ephemeral: true });
+        return interaction.reply({ content: "❌ Cet ID de carte est déjà utilisé !", ephemeral: true });
 
       data[cat].push({
         id,
@@ -275,49 +299,63 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       saveJSON("./data.json", data);
-
-      return interaction.reply({ content: `✅ Ajouté ${id}`, ephemeral: true });
+      return interaction.reply({ content: `✅ La carte **${nom}** (${id}) a été ajoutée à la catégorie **${cat}** !`, ephemeral: true });
     }
 
     // ===== DONNER =====
-    if (interaction.commandName === "donner-carte") {
-
+    if (interaction.isChatInputCommand() && interaction.commandName === "donner-carte") {
       const user = interaction.options.getUser("utilisateur");
       const id = interaction.options.getString("id");
 
+      // Vérification si la carte existe globalement avant de la donner
+      const cardExists = Object.values(data).flat().some(c => c.id === id);
+      if (!cardExists) {
+        return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas dans le système.`, ephemeral: true });
+      }
+
       const p = getUser(user.id);
+      if (p.cards.includes(id)) {
+        return interaction.reply({ content: `⚠️ Cet utilisateur possède déjà la carte **${id}**.`, ephemeral: true });
+      }
 
-      if (!p.cards.includes(id)) p.cards.push(id);
-
+      p.cards.push(id);
       saveJSON("./players.json", players);
 
-      return interaction.reply({ content: `🎁 Donné ${id}`, ephemeral: true });
+      return interaction.reply({ content: `🎁 La carte **${id}** a été ajoutée à la collection de <@${user.id}> !`, ephemeral: true });
     }
 
-    // ===== STATS =====
-    if (interaction.commandName === "stats-cartes") {
-
+    // ===== STATS COMMANDE =====
+    if (interaction.isChatInputCommand() && interaction.commandName === "stats-cartes") {
       const total = Object.values(data).flat().length;
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setTitle("📊 Stats")
-            .setDescription(`Total cartes: **${total}**`)
+            .setColor(0x3498db)
+            .setDescription(`Total de cartes enregistrées: **${total}**`)
         ],
         ephemeral: true
       });
     }
 
   } catch (e) {
-    console.log("❌ ERROR:", e);
-
-    if (!interaction.replied)
+    console.error("❌ ERREUR INTERACTION :", e);
+    
+    // Éviter de crash si l'interaction a déjà été répondue
+    if (!interaction.replied && !interaction.deferred) {
       return interaction.reply({
-        content: "❌ erreur système safe mode",
+        content: "❌ Une erreur interne est survenue lors de l'exécution de cette action.",
         ephemeral: true
       });
+    }
   }
 });
 
-client.login(TOKEN);
+// Connexion sécurisée
+if (!TOKEN || !CLIENT_ID) {
+  console.error("❌ Erreur : TOKEN ou CLIENT_ID manquant dans les variables d'environnement Railway !");
+  process.exit(1);
+} else {
+  client.login(TOKEN);
+        }
