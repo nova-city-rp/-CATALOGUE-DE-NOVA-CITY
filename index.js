@@ -79,40 +79,40 @@ const commands = [
       o.setName("id").setDescription("ID (CIV-001)").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("nom").setDescription("Nom de la carte").setRequired(true)
+      o.setName("nom").setDescription("Nom carte").setRequired(true)
     )
     .addAttachmentOption(o =>
-      o.setName("image").setDescription("Image carte").setRequired(true)
+      o.setName("image").setDescription("Image").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("supprimer-carte")
-    .setDescription("🗑️ Supprimer une carte (ADMIN)")
+    .setDescription("🗑️ Supprimer carte")
     .addStringOption(o =>
       o.setName("categorie").setDescription("Catégorie").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id").setDescription("ID carte").setRequired(true)
+      o.setName("id").setDescription("ID").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
-    .setDescription("🎁 Donner une carte (ADMIN)")
+    .setDescription("🎁 Donner carte")
     .addUserOption(o =>
       o.setName("utilisateur").setDescription("Joueur").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id").setDescription("ID carte").setRequired(true)
+      o.setName("id").setDescription("ID").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("retirer-carte")
-    .setDescription("🚫 Retirer une carte (ADMIN)")
+    .setDescription("🚫 Retirer carte")
     .addUserOption(o =>
       o.setName("utilisateur").setDescription("Joueur").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id").setDescription("ID carte").setRequired(true)
+      o.setName("id").setDescription("ID").setRequired(true)
     )
 ].map(c => c.toJSON());
 
@@ -137,15 +137,9 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "cartes") {
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("cat")
-        .setLabel("📁 Catalogue")
-        .setStyle(ButtonStyle.Primary),
-
-      new ButtonBuilder()
-        .setCustomId("view")
-        .setLabel("🎴 Voir carte")
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId("cat").setLabel("📁 Catalogue").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("view").setLabel("🎴 Voir carte").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("stats").setLabel("📊 Stats").setStyle(ButtonStyle.Success)
     );
 
     return interaction.reply({
@@ -169,7 +163,7 @@ client.on("interactionCreate", async (interaction) => {
         .setPlaceholder("Choisis catégorie")
         .addOptions(
           Object.keys(categories).map(c => ({
-            label: c.toUpperCase(),
+            label: c,
             value: c
           }))
         );
@@ -187,13 +181,28 @@ client.on("interactionCreate", async (interaction) => {
         .setPlaceholder("Choisis catégorie")
         .addOptions(
           Object.keys(categories).map(c => ({
-            label: c.toUpperCase(),
+            label: c,
             value: c
           }))
         );
 
       return interaction.reply({
         components: [new ActionRowBuilder().addComponents(menu)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.customId === "stats") {
+
+      const total = Object.values(data).flat().length;
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("📊 Stats cartes")
+            .setDescription(`Total cartes : **${total}**`)
+            .setColor("Green")
+        ],
         ephemeral: true
       });
     }
@@ -206,22 +215,19 @@ client.on("interactionCreate", async (interaction) => {
     const cards = data[cat] || [];
 
     const embed = new EmbedBuilder()
-      .setTitle(`📁 ${cat.toUpperCase()}`)
+      .setTitle(cat.toUpperCase())
       .setDescription(
         cards.length
           ? cards.map(c => `🎴 ${c.id} - ${c.nom}`).join("\n")
           : "Aucune carte"
       );
 
-    if (cards[0]) embed.setThumbnail(cards[0].image);
+    if (cards[0]?.image) embed.setThumbnail(cards[0].image);
 
-    return interaction.update({
-      embeds: [embed],
-      components: []
-    });
+    return interaction.update({ embeds: [embed], components: [] });
   }
 
-  // ================= VIEW FLOW =================
+  // ================= VIEW =================
   if (interaction.isStringSelectMenu() && interaction.customId === "view_cat") {
 
     const cat = interaction.values[0];
@@ -233,7 +239,8 @@ client.on("interactionCreate", async (interaction) => {
       .addOptions(
         cards.map(c => ({
           label: c.id,
-          value: c.id
+          value: c.id,
+          description: c.nom
         }))
       );
 
@@ -250,18 +257,13 @@ client.on("interactionCreate", async (interaction) => {
     const card = (data[cat] || []).find(c => c.id === id);
     if (!card) return interaction.update({ content: "❌ Introuvable", components: [] });
 
-    const file = new AttachmentBuilder(Buffer.from(await fetch(card.image).then(r => r.arrayBuffer())), {
-      name: "card.png"
-    });
-
     return interaction.update({
       embeds: [
         new EmbedBuilder()
           .setTitle(`${card.id} - ${card.nom}`)
-          .setImage("attachment://card.png")
+          .setImage(card.image)
           .setFooter({ text: card.rarity })
       ],
-      files: [file],
       components: []
     });
   }
@@ -327,6 +329,37 @@ client.on("interactionCreate", async (interaction) => {
 
     return interaction.reply({ content: `🗑️ Retiré ${id}`, ephemeral: true });
   }
+
+  // ================= MES CARTES =================
+  if (interaction.commandName === "mes-cartes") {
+
+    const userCards = players[interaction.user.id]?.cards || [];
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📚 Tes cartes")
+          .setDescription(userCards.length ? userCards.join("\n") : "Aucune carte")
+      ],
+      ephemeral: true
+    });
+  }
+
+  // ================= STATS =================
+  if (interaction.commandName === "stats-cartes") {
+
+    const total = Object.values(data).flat().length;
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📊 Statistiques")
+          .setDescription(`Total cartes : **${total}**`)
+      ],
+      ephemeral: true
+    });
+  }
+
 });
 
 client.login(TOKEN);
