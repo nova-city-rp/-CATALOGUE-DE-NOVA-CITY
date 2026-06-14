@@ -21,11 +21,9 @@ const client = new Client({
 });
 
 // ================= SAFE JSON (AVEC VOLUME PERMANENT) =================
-// On utilise le dossier /app/data relié à ton volume Railway pour ne jamais perdre les cartes
 const DATA_FILE = "/app/data/data.json";
 const PLAYERS_FILE = "/app/data/players.json";
 
-// Crée automatiquement le dossier s'il n'existe pas encore sur le volume Railway
 if (!fs.existsSync("/app/data")) {
   fs.mkdirSync("/app/data", { recursive: true });
 }
@@ -104,13 +102,14 @@ const commands = [
     .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur à qui retirer la carte").setRequired(true))
     .addStringOption(o => o.setName("id").setDescription("L'identifiant unique de la carte").setRequired(true)),
 
+  // ICI : Modification de l'option image pour accepter directement un fichier !
   new SlashCommandBuilder()
     .setName("ajouter-carte")
     .setDescription("Créer une nouvelle carte dans le système (ADMIN)")
     .addStringOption(o => o.setName("categorie").setDescription("La catégorie de la carte").setRequired(true))
     .addStringOption(o => o.setName("id").setDescription("L'ID unique pour cette carte").setRequired(true))
     .addStringOption(o => o.setName("nom").setDescription("Le nom de la carte").setRequired(true))
-    .addStringOption(o => o.setName("image").setDescription("L'URL de l'image").setRequired(true)),
+    .addAttachmentOption(o => o.setName("image").setDescription("Glissez directement la photo de la carte").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
@@ -160,7 +159,6 @@ client.on("interactionCreate", async (interaction) => {
 
     // ===== BUTTONS =====
     if (interaction.isButton()) {
-
       if (interaction.customId === "cat") {
         const options = Object.keys(categories).slice(0, 25).map(c => ({
           label: c.toUpperCase().replace("_", " "),
@@ -226,7 +224,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===== GLOBAL CATALOGUE (GRID STYLE EMBED) =====
+    // ===== GLOBAL CATALOGUE =====
     if (interaction.isChatInputCommand() && interaction.commandName === "catalogueglobale") {
       const all = Object.values(data).flat();
 
@@ -285,7 +283,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===== AJOUT =====
+    // ===== AJOUT AVEC FICHIER JOINT =====
     if (interaction.isChatInputCommand() && interaction.commandName === "ajouter-carte") {
       if (!interaction.memberPermissions?.has("Administrator"))
         return interaction.reply({ content: "❌ Seuls les administrateurs peuvent faire cela.", ephemeral: true });
@@ -293,10 +291,17 @@ client.on("interactionCreate", async (interaction) => {
       const cat = interaction.options.getString("categorie").toLowerCase();
       const id = interaction.options.getString("id");
       const nom = interaction.options.getString("nom");
-      const image = interaction.options.getString("image");
+      
+      // On récupère l'URL directement depuis le fichier envoyé !
+      const imageAttachment = interaction.options.getAttachment("image");
+      const image = imageAttachment ? imageAttachment.url : null;
 
       if (!categories[cat]) {
         return interaction.reply({ content: `❌ Cette catégorie n'existe pas. Choisis parmi : ${Object.keys(categories).join(', ')}`, ephemeral: true });
+      }
+
+      if (!image) {
+        return interaction.reply({ content: "❌ Impossible de récupérer l'image de votre fichier.", ephemeral: true });
       }
 
       if (!data[cat]) data[cat] = [];
@@ -364,10 +369,9 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// Connexion sécurisée
 if (!TOKEN || !CLIENT_ID) {
   console.error("❌ Erreur : Les variables d'environnement TOKEN ou CLIENT_ID sont introuvables !");
   process.exit(1);
 } else {
   client.login(TOKEN);
-  }
+              }
