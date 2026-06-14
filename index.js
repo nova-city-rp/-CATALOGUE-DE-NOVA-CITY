@@ -93,21 +93,21 @@ const commands = [
     .setName("retirer-carte")
     .setDescription("Retirer une carte de la collection d’un joueur")
     .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur à qui retirer la carte").setRequired(true))
-    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique (ID) de la carte").setRequired(true)),
+    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique de la carte").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("ajouter-carte")
     .setDescription("Créer une nouvelle carte dans le système (ADMIN)")
-    .addStringOption(o => o.setName("categorie").setDescription("La catégorie (ex: civil, metier, faction...)").setRequired(true))
-    .addStringOption(o => o.setName("id").setDescription("L'ID unique pour cette nouvelle carte").setRequired(true))
-    .addStringOption(o => o.setName("nom").setDescription("Le nom d'affichage de la carte").setRequired(true))
-    .addStringOption(o => o.setName("image").setDescription("Le lien URL de l'image de la carte").setRequired(true)),
+    .addStringOption(o => o.setName("categorie").setDescription("La catégorie de la carte").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("L'ID unique pour cette carte").setRequired(true))
+    .addStringOption(o => o.setName("nom").setDescription("Le nom de la carte").setRequired(true))
+    .addStringOption(o => o.setName("image").setDescription("L'URL de l'image").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
     .setDescription("Donner une carte spécifique à un utilisateur")
     .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur qui va recevoir la carte").setRequired(true))
-    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique (ID) de la carte à donner").setRequired(true)),
+    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique de la carte à donner").setRequired(true)),
 ].map(c => c.toJSON());
 
 // ================= DEPLOY & LOGIN =================
@@ -357,8 +357,8 @@ client.on("interactionCreate", async (interaction) => {
 
 // Connexion sécurisée
 if (!TOKEN || !CLIENT_ID) {
-  console.error("❌ Erreur : Les variables d'environnement TOKEN ou CLIENT_ID sont introuvables ! Vérifie la configuration sur Railway.");
+  console.error("❌ Erreur : Les variables d'environnement TOKEN ou CLIENT_ID sont introuvables !");
   process.exit(1);
 } else {
   client.login(TOKEN);
-}
+          }
