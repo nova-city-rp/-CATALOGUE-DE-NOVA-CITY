@@ -7,7 +7,8 @@ const {
   Routes,
   EmbedBuilder,
   ActionRowBuilder,
-  StringSelectMenuBuilder
+  StringSelectMenuBuilder,
+  AttachmentBuilder
 } = require("discord.js");
 
 // ===================== CONFIG =====================
@@ -38,12 +39,12 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("voir-carte")
-    .setDescription("🎴 Voir tes cartes ou une carte précise")
+    .setDescription("🎴 Voir une carte")
     .addStringOption(o =>
       o.setName("categorie").setDescription("Catégorie").setRequired(true)
     )
-    .addIntegerOption(o =>
-      o.setName("id").setDescription("ID carte").setRequired(false)
+    .addStringOption(o =>
+      o.setName("id").setDescription("ID carte (ex: CIV-001)").setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -53,26 +54,19 @@ const commands = [
       o.setName("categorie").setDescription("Catégorie").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("url").setDescription("Image URL").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("supprimer-carte")
-    .setDescription("🗑️ Supprimer une carte (ADMIN)")
-    .addStringOption(o =>
-      o.setName("categorie").setDescription("Catégorie").setRequired(true)
+      o.setName("rarity").setDescription("commun / rare / epique / legendaire").setRequired(true)
     )
-    .addIntegerOption(o =>
-      o.setName("id").setDescription("ID carte").setRequired(true)
+    .addAttachmentOption(o =>
+      o.setName("image").setDescription("Image de la carte").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
-    .setDescription("🎁 Donner une carte (ADMIN)")
+    .setDescription("🎁 Donner une carte")
     .addUserOption(o =>
       o.setName("utilisateur").setDescription("Joueur").setRequired(true)
     )
-    .addIntegerOption(o =>
+    .addStringOption(o =>
       o.setName("id").setDescription("ID carte").setRequired(true)
     )
 
@@ -105,95 +99,69 @@ client.on("interactionCreate", async (interaction) => {
       .setPlaceholder("📁 Choisis une catégorie")
       .addOptions(
         Object.keys(data).map(c => ({
-          label: c.toUpperCase(),
+          label: `${c.toUpperCase()} (${data[c].length})`,
           value: c
         }))
       );
 
     const row = new ActionRowBuilder().addComponents(menu);
 
-    const embed = new EmbedBuilder()
-      .setTitle("📁 Catalogue des cartes")
-      .setDescription("Choisis une catégorie")
-      .setColor("Blue");
-
     return interaction.reply({
-      embeds: [embed],
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📁 Catalogue des cartes")
+          .setColor("Blue")
+      ],
       components: [row],
       ephemeral: true
     });
   }
 
-  // ===================== MENU CATÉGORIE =====================
+  // ===================== MENU CAT =====================
   if (interaction.isStringSelectMenu() && interaction.customId === "menu_cat") {
 
     const cat = interaction.values[0];
     const cards = data[cat] || [];
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📁 ${cat.toUpperCase()}`)
-      .setDescription(
-        cards.length
-          ? cards.map(c => `🎴 Carte #${c.id}`).join("\n")
-          : "❌ Aucune carte"
-      )
-      .setColor("Green");
-
-    return interaction.update({ embeds: [embed], components: [] });
+    return interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`📁 ${cat.toUpperCase()}`)
+          .setDescription(cards.map(c => `🎴 ${c.id} - ${c.rarity}`).join("\n"))
+          .setColor("Green")
+      ],
+      components: []
+    });
   }
 
-  // ===================== /VOIR-CARTE =====================
+  // ===================== VOIR CARTE =====================
   if (interaction.commandName === "voir-carte") {
 
     const cat = interaction.options.getString("categorie");
-    const id = interaction.options.getInteger("id");
+    const id = interaction.options.getString("id");
 
-    const userId = interaction.user.id;
-    const user = players[userId] || { cards: [] };
+    const card = (data[cat] || []).find(c => c.id === id);
 
-    if (!data[cat]) {
-      return interaction.reply({ content: "❌ Catégorie invalide", ephemeral: true });
+    if (!card) {
+      return interaction.reply({ content: "❌ Carte introuvable", ephemeral: true });
     }
 
-    // ===== CARTE PRÉCISE =====
-    if (id) {
+    const file = new AttachmentBuilder(card.file);
 
-      if (!user.cards.includes(id)) {
-        return interaction.reply({ content: "❌ Tu ne possèdes pas cette carte", ephemeral: true });
-      }
-
-      const card = data[cat].find(c => c.id === id);
-
-      if (!card) {
-        return interaction.reply({ content: "❌ Carte introuvable", ephemeral: true });
-      }
-
-      const embed = new EmbedBuilder()
-        .setTitle(`🎴 Carte #${id}`)
-        .setImage(card.url)
-        .setColor("Gold");
-
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
-    // ===== LISTE CARTES =====
-    const owned = data[cat].filter(c =>
-      user.cards.includes(c.id)
-    );
-
-    const embed = new EmbedBuilder()
-      .setTitle(`📁 Tes cartes - ${cat}`)
-      .setDescription(
-        owned.length
-          ? owned.map(c => `🎴 Carte #${c.id}`).join("\n")
-          : "❌ Aucune carte"
-      )
-      .setColor("Blue");
-
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`🎴 ${card.id}`)
+          .setImage(`attachment://${card.file}`)
+          .setColor("Gold")
+          .setFooter({ text: `Rareté : ${card.rarity}` })
+      ],
+      files: [file],
+      ephemeral: true
+    });
   }
 
-  // ===================== /AJOUTER-CARTE =====================
+  // ===================== AJOUT CARTE =====================
   if (interaction.commandName === "ajouter-carte") {
 
     if (!interaction.member.permissions.has("Administrator")) {
@@ -201,13 +169,18 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const cat = interaction.options.getString("categorie");
-    const url = interaction.options.getString("url");
+    const rarity = interaction.options.getString("rarity");
+    const image = interaction.options.getAttachment("image");
 
     if (!data[cat]) data[cat] = [];
 
-    const id = Math.floor(Math.random() * 100000);
+    const id = `${cat.toUpperCase().slice(0,3)}-${String(data[cat].length + 1).padStart(3, "0")}`;
 
-    data[cat].push({ id, url });
+    data[cat].push({
+      id,
+      rarity,
+      file: image.name
+    });
 
     fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
 
@@ -215,34 +188,15 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("➕ Carte ajoutée")
-          .setDescription(`ID #${id}`)
+          .setDescription(`${id} (${rarity})`)
+          .setImage(image.url)
           .setColor("Green")
       ],
       ephemeral: true
     });
   }
 
-  // ===================== /SUPPRIMER-CARTE =====================
-  if (interaction.commandName === "supprimer-carte") {
-
-    if (!interaction.member.permissions.has("Administrator")) {
-      return interaction.reply({ content: "❌ Pas autorisé", ephemeral: true });
-    }
-
-    const cat = interaction.options.getString("categorie");
-    const id = interaction.options.getInteger("id");
-
-    data[cat] = (data[cat] || []).filter(c => c.id !== id);
-
-    fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
-
-    return interaction.reply({
-      content: `🗑️ Carte #${id} supprimée`,
-      ephemeral: true
-    });
-  }
-
-  // ===================== /DONNER-CARTE =====================
+  // ===================== DONNER CARTE =====================
   if (interaction.commandName === "donner-carte") {
 
     if (!interaction.member.permissions.has("Administrator")) {
@@ -250,7 +204,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const user = interaction.options.getUser("utilisateur");
-    const id = interaction.options.getInteger("id");
+    const id = interaction.options.getString("id");
 
     if (!players[user.id]) players[user.id] = { cards: [] };
 
@@ -261,12 +215,7 @@ client.on("interactionCreate", async (interaction) => {
     savePlayers();
 
     return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🎁 Carte donnée")
-          .setDescription(`Carte #${id} envoyée à ${user.username}`)
-          .setColor("Gold")
-      ],
+      content: `🎁 Carte ${id} donnée à ${user.username}`,
       ephemeral: true
     });
   }
