@@ -20,7 +20,16 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= SAFE JSON =================
+// ================= SAFE JSON (AVEC VOLUME PERMANENT) =================
+// On utilise le dossier /app/data relié à ton volume Railway pour ne jamais perdre les cartes
+const DATA_FILE = "/app/data/data.json";
+const PLAYERS_FILE = "/app/data/players.json";
+
+// Crée automatiquement le dossier s'il n'existe pas encore sur le volume Railway
+if (!fs.existsSync("/app/data")) {
+  fs.mkdirSync("/app/data", { recursive: true });
+}
+
 function loadJSON(file) {
   try {
     if (!fs.existsSync(file)) return {};
@@ -39,8 +48,8 @@ function saveJSON(file, data) {
   }
 }
 
-let data = loadJSON("./data.json");
-let players = loadJSON("./players.json");
+let data = loadJSON(DATA_FILE);
+let players = loadJSON(PLAYERS_FILE);
 
 // ================= RARETE STYLE =================
 const rarityStyle = {
@@ -253,7 +262,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       p.cards = p.cards.filter(c => c !== id);
-      saveJSON("./players.json", players);
+      saveJSON(PLAYERS_FILE, players);
 
       return interaction.reply({
         content: `🗑️ Carte **${id}** retirée avec succès de <@${user.id}>.`,
@@ -303,7 +312,7 @@ client.on("interactionCreate", async (interaction) => {
         rarity: categories[cat] || "commun"
       });
 
-      saveJSON("./data.json", data);
+      saveJSON(DATA_FILE, data);
       return interaction.reply({ content: `✅ La carte **${nom}** (${id}) a été ajoutée à la catégorie **${cat}** !`, ephemeral: true });
     }
 
@@ -323,7 +332,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       p.cards.push(id);
-      saveJSON("./players.json", players);
+      saveJSON(PLAYERS_FILE, players);
 
       return interaction.reply({ content: `🎁 La carte **${id}** a été ajoutée à la collection de <@${user.id}> !`, ephemeral: true });
     }
@@ -361,4 +370,4 @@ if (!TOKEN || !CLIENT_ID) {
   process.exit(1);
 } else {
   client.login(TOKEN);
-          }
+  }
