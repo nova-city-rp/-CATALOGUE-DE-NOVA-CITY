@@ -73,44 +73,51 @@ const categories = {
 
 // ================= SLASH COMMANDS =================
 const commands = [
-  new SlashCommandBuilder().setName("cartes").setDescription("Menu cartes"),
-  new SlashCommandBuilder().setName("mes-cartes").setDescription("Tes cartes"),
-  new SlashCommandBuilder().setName("stats-cartes").setDescription("Stats globales"),
+  new SlashCommandBuilder()
+    .setName("cartes")
+    .setDescription("Afficher le menu principal des cartes"),
+    
+  new SlashCommandBuilder()
+    .setName("mes-cartes")
+    .setDescription("Voir votre collection de cartes"),
+    
+  new SlashCommandBuilder()
+    .setName("stats-cartes")
+    .setDescription("Voir les statistiques globales des cartes"),
 
   new SlashCommandBuilder()
     .setName("catalogueglobale")
-    .setDescription("Voir toutes les cartes"),
+    .setDescription("Voir la liste complète de toutes les cartes existantes"),
 
   new SlashCommandBuilder()
     .setName("retirer-carte")
-    .setDescription("Retirer une carte d’un joueur")
-    .addUserOption(o => o.setName("utilisateur").setRequired(true))
-    .addStringOption(o => o.setName("id").setRequired(true)),
+    .setDescription("Retirer une carte de la collection d’un joueur")
+    .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur à qui retirer la carte").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique (ID) de la carte").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("ajouter-carte")
-    .setDescription("Ajouter une carte (ADMIN)")
-    .addStringOption(o => o.setName("categorie").setRequired(true))
-    .addStringOption(o => o.setName("id").setRequired(true))
-    .addStringOption(o => o.setName("nom").setRequired(true))
-    .addStringOption(o => o.setName("image").setRequired(true)),
+    .setDescription("Créer une nouvelle carte dans le système (ADMIN)")
+    .addStringOption(o => o.setName("categorie").setDescription("La catégorie (ex: civil, metier, faction...)").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("L'ID unique pour cette nouvelle carte").setRequired(true))
+    .addStringOption(o => o.setName("nom").setDescription("Le nom d'affichage de la carte").setRequired(true))
+    .addStringOption(o => o.setName("image").setDescription("Le lien URL de l'image de la carte").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
-    .setDescription("Donner une carte à un utilisateur")
-    .addUserOption(o => o.setName("utilisateur").setRequired(true))
-    .addStringOption(o => o.setName("id").setRequired(true)),
+    .setDescription("Donner une carte spécifique à un utilisateur")
+    .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur qui va recevoir la carte").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("L'identifiant unique (ID) de la carte à donner").setRequired(true)),
 ].map(c => c.toJSON());
 
 // ================= DEPLOY & LOGIN =================
 client.once("ready", async () => {
   console.log(`🤖 Bot connecté en tant que ${client.user.tag}`);
   
-  // Déploiement des commandes une fois le bot en ligne et authentifié
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-    console.log("✅ Commandes Slash enregistrées avec succès !");
+    console.log("✅ Commandes Slash enregistrées avec succès auprès de Discord !");
   } catch (error) {
     console.error("❌ Erreur lors de l'enregistrement des commandes :", error);
   }
@@ -146,7 +153,6 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton()) {
 
       if (interaction.customId === "cat") {
-        // Limitation Discord de sécurité (Max 25 options dans un select menu)
         const options = Object.keys(categories).slice(0, 25).map(c => ({
           label: c.toUpperCase().replace("_", " "),
           value: c
@@ -207,7 +213,7 @@ client.on("interactionCreate", async (interaction) => {
                 : "Aucune carte dans cette catégorie."
             )
         ],
-        components: [] // Supprime le menu après sélection pour éviter les bugs
+        components: []
       });
     }
 
@@ -223,7 +229,6 @@ client.on("interactionCreate", async (interaction) => {
         .setTitle("🌍 CATALOGUE GLOBAL")
         .setColor(0x5865f2);
 
-      // Limite d'affichage de Discord à 25 champs maximum
       all.slice(0, 25).forEach(card => {
         const r = rarityStyle[card.rarity] || rarityStyle.commun;
         embed.addFields({
@@ -282,7 +287,7 @@ client.on("interactionCreate", async (interaction) => {
       const image = interaction.options.getString("image");
 
       if (!categories[cat]) {
-        return interaction.reply({ content: `❌ Cette catégorie n'existe pas. Choisi parmi : ${Object.keys(categories).join(', ')}`, ephemeral: true });
+        return interaction.reply({ content: `❌ Cette catégorie n'existe pas. Choisis parmi : ${Object.keys(categories).join(', ')}`, ephemeral: true });
       }
 
       if (!data[cat]) data[cat] = [];
@@ -307,7 +312,6 @@ client.on("interactionCreate", async (interaction) => {
       const user = interaction.options.getUser("utilisateur");
       const id = interaction.options.getString("id");
 
-      // Vérification si la carte existe globalement avant de la donner
       const cardExists = Object.values(data).flat().some(c => c.id === id);
       if (!cardExists) {
         return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas dans le système.`, ephemeral: true });
@@ -342,7 +346,6 @@ client.on("interactionCreate", async (interaction) => {
   } catch (e) {
     console.error("❌ ERREUR INTERACTION :", e);
     
-    // Éviter de crash si l'interaction a déjà été répondue
     if (!interaction.replied && !interaction.deferred) {
       return interaction.reply({
         content: "❌ Une erreur interne est survenue lors de l'exécution de cette action.",
@@ -354,8 +357,8 @@ client.on("interactionCreate", async (interaction) => {
 
 // Connexion sécurisée
 if (!TOKEN || !CLIENT_ID) {
-  console.error("❌ Erreur : TOKEN ou CLIENT_ID manquant dans les variables d'environnement Railway !");
+  console.error("❌ Erreur : Les variables d'environnement TOKEN ou CLIENT_ID sont introuvables ! Vérifie la configuration sur Railway.");
   process.exit(1);
 } else {
   client.login(TOKEN);
-        }
+}
