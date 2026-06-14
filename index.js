@@ -54,13 +54,13 @@ const categories = {
   fondatrice: "royal"
 };
 
-// ================= COMMANDES =================
+// ================= COMMANDS =================
 const commands = [
   new SlashCommandBuilder().setName("cartes").setDescription("🎮 Menu cartes"),
 
   new SlashCommandBuilder().setName("mes-cartes").setDescription("📚 Tes cartes"),
 
-  new SlashCommandBuilder().setName("stats-cartes").setDescription("📊 Stats"),
+  new SlashCommandBuilder().setName("stats-cartes").setDescription("📊 Stats globales"),
 
   new SlashCommandBuilder()
     .setName("ajouter-carte")
@@ -68,17 +68,22 @@ const commands = [
     .addStringOption(o => o.setName("categorie").setRequired(true))
     .addStringOption(o => o.setName("id").setRequired(true))
     .addStringOption(o => o.setName("nom").setRequired(true))
-    .addAttachmentOption(o => o.setName("image").setRequired(true)),
+    .addStringOption(o => o.setName("image").setRequired(true)),
 
   new SlashCommandBuilder()
-    .setName("donner-carte")
-    .setDescription("🎁 Donner carte")
-    .addUserOption(o => o.setName("utilisateur").setRequired(true))
+    .setName("supprimer-carte")
+    .setDescription("🗑️ Supprimer carte GLOBAL")
     .addStringOption(o => o.setName("id").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("retirer-carte")
-    .setDescription("🗑️ Retirer carte")
+    .setDescription("🚫 Retirer carte à un joueur")
+    .addUserOption(o => o.setName("utilisateur").setRequired(true))
+    .addStringOption(o => o.setName("id").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("donner-carte")
+    .setDescription("🎁 Donner carte")
     .addUserOption(o => o.setName("utilisateur").setRequired(true))
     .addStringOption(o => o.setName("id").setRequired(true))
 ].map(c => c.toJSON());
@@ -87,9 +92,7 @@ const commands = [
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
-  await rest.put(Routes.applicationCommands(CLIENT_ID), {
-    body: commands
-  });
+  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
   console.log("✅ Commands OK");
 })();
 
@@ -101,7 +104,7 @@ client.once("ready", () => {
 // ================= MENU =================
 client.on("interactionCreate", async (interaction) => {
 
-  // ===== MENU PRINCIPAL =====
+  // ================= MENU =================
   if (interaction.commandName === "cartes") {
 
     const row = new ActionRowBuilder().addComponents(
@@ -111,17 +114,13 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🎮 MENU CARTES")
-          .setColor("Blue")
-      ],
+      embeds: [new EmbedBuilder().setTitle("🎮 MENU CARTES").setColor("Blue")],
       components: [row],
       ephemeral: true
     });
   }
 
-  // ===== BUTTONS =====
+  // ================= BUTTONS =================
   if (interaction.isButton()) {
 
     if (interaction.customId === "cat") {
@@ -159,14 +158,15 @@ client.on("interactionCreate", async (interaction) => {
         embeds: [
           new EmbedBuilder()
             .setTitle("📊 Stats")
-            .setDescription(`Total cartes : **${total}**`)
+            .setDescription(`Total cartes: **${total}**`)
+            .setColor("Green")
         ],
         ephemeral: true
       });
     }
   }
 
-  // ===== CATALOGUE =====
+  // ================= CATALOGUE =================
   if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
 
     const cat = interaction.values[0];
@@ -186,7 +186,7 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ===== VIEW =====
+  // ================= VIEW =================
   if (interaction.isStringSelectMenu() && interaction.customId === "view_cat") {
 
     const cat = interaction.values[0];
@@ -227,7 +227,7 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ===== AJOUT =====
+  // ================= ADD =================
   if (interaction.commandName === "ajouter-carte") {
 
     if (!interaction.member.permissions.has("Administrator"))
@@ -236,18 +236,21 @@ client.on("interactionCreate", async (interaction) => {
     const cat = interaction.options.getString("categorie");
     const id = interaction.options.getString("id");
     const nom = interaction.options.getString("nom");
-    const image = interaction.options.getAttachment("image");
+    const image = interaction.options.getString("image");
 
     if (!data[cat]) data[cat] = [];
 
-    if (data[cat].some(c => c.id === id))
-      return interaction.reply({ content: "❌ ID déjà utilisé", ephemeral: true });
+    // anti doublon GLOBAL
+    const exists = Object.values(data).flat().some(c => c.id === id);
+    if (exists)
+      return interaction.reply({ content: "❌ ID déjà utilisé globalement", ephemeral: true });
 
     data[cat].push({
       id,
       nom,
-      image: image.url,
-      rarity: categories[cat] || "commun"
+      image,
+      rarity: categories[cat] || "commun",
+      owner: null
     });
 
     saveData();
@@ -255,32 +258,40 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `✅ Carte ajoutée ${id}`, ephemeral: true });
   }
 
-  // ===== DONNER =====
+  // ================= DONNER =================
   if (interaction.commandName === "donner-carte") {
 
     const user = interaction.options.getUser("utilisateur");
     const id = interaction.options.getString("id");
 
-    if (!players[user.id]) players[user.id] = { cards: [] };
+    let found = false;
 
-    if (!players[user.id].cards.includes(id))
-      players[user.id].cards.push(id);
+    for (const cat in data) {
+      const card = data[cat].find(c => c.id === id);
+      if (card) {
+        if (!players[user.id]) players[user.id] = { cards: [] };
+        players[user.id].cards.push(id);
+        found = true;
+        break;
+      }
+    }
 
     savePlayers();
 
-    return interaction.reply({ content: `🎁 Donné ${id}`, ephemeral: true });
+    return interaction.reply({
+      content: found ? `🎁 Donné ${id}` : "❌ Carte introuvable",
+      ephemeral: true
+    });
   }
 
-  // ===== RETIRER =====
+  // ================= RETIRER =================
   if (interaction.commandName === "retirer-carte") {
-
-    if (!interaction.member.permissions.has("Administrator"))
-      return interaction.reply({ content: "❌ Admin only", ephemeral: true });
 
     const user = interaction.options.getUser("utilisateur");
     const id = interaction.options.getString("id");
 
-    if (!players[user.id]) return;
+    if (!players[user.id])
+      return interaction.reply({ content: "❌ Rien", ephemeral: true });
 
     players[user.id].cards =
       players[user.id].cards.filter(c => c !== id);
@@ -290,7 +301,33 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({ content: `🗑️ Retiré ${id}`, ephemeral: true });
   }
 
-  // ===== MES CARTES =====
+  // ================= SUPPRIMER GLOBAL =================
+  if (interaction.commandName === "supprimer-carte") {
+
+    if (!interaction.member.permissions.has("Administrator"))
+      return interaction.reply({ content: "❌ Admin only", ephemeral: true });
+
+    const id = interaction.options.getString("id");
+
+    let removed = false;
+
+    for (const cat in data) {
+      const index = data[cat].findIndex(c => c.id === id);
+      if (index !== -1) {
+        data[cat].splice(index, 1);
+        removed = true;
+      }
+    }
+
+    saveData();
+
+    return interaction.reply({
+      content: removed ? `🗑️ Carte supprimée ${id}` : "❌ Introuvable",
+      ephemeral: true
+    });
+  }
+
+  // ================= MES CARTES =================
   if (interaction.commandName === "mes-cartes") {
 
     const cards = players[interaction.user.id]?.cards || [];
@@ -304,6 +341,22 @@ client.on("interactionCreate", async (interaction) => {
       ephemeral: true
     });
   }
+
+  // ================= STATS =================
+  if (interaction.commandName === "stats-cartes") {
+
+    const total = Object.values(data).flat().length;
+
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("📊 Stats globales")
+          .setDescription(`Total cartes: **${total}**`)
+      ],
+      ephemeral: true
+    });
+  }
+
 });
 
 client.login(TOKEN);
