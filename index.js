@@ -20,37 +20,28 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= SAFE LOAD =================
+// ================= SAFE JSON =================
 function loadJSON(file) {
   try {
-    return fs.existsSync(file)
-      ? JSON.parse(fs.readFileSync(file, "utf8"))
-      : {};
-  } catch {
+    if (!fs.existsSync(file)) return {};
+    const raw = fs.readFileSync(file, "utf8");
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.log("⚠️ JSON error reset:", file);
     return {};
+  }
+}
+
+function saveJSON(file, data) {
+  try {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.log("❌ Save error:", file, e.message);
   }
 }
 
 let data = loadJSON("./data.json");
 let players = loadJSON("./players.json");
-
-const saveData = () =>
-  fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
-
-const savePlayers = () =>
-  fs.writeFileSync("./players.json", JSON.stringify(players, null, 2));
-
-// ================= RARETÉ STYLE =================
-const rarityStyle = {
-  commun: { color: 0x9e9e9e, emoji: "⚪" },
-  rare: { color: 0x3498db, emoji: "🔵" },
-  epic: { color: 0x9b59b6, emoji: "🟣" },
-  unique: { color: 0xf1c40f, emoji: "🟡" },
-  elite: { color: 0xe67e22, emoji: "🟠" },
-  erudit: { color: 0x2ecc71, emoji: "🟢" },
-  legendaire: { color: 0xe74c3c, emoji: "🔴" },
-  royal: { color: 0x000000, emoji: "👑" }
-};
 
 // ================= CATEGORIES =================
 const categories = {
@@ -71,293 +62,245 @@ const categories = {
   fondatrice: "royal"
 };
 
-// ================= COMMANDS =================
-const commands = [
+// ================= SLASH COMMANDS SAFE =================
+const commandsRaw = [
   new SlashCommandBuilder().setName("cartes").setDescription("Menu cartes"),
   new SlashCommandBuilder().setName("mes-cartes").setDescription("Tes cartes"),
   new SlashCommandBuilder().setName("stats-cartes").setDescription("Stats"),
 
   new SlashCommandBuilder()
+    .setName("shop")
+    .setDescription("Boutique cartes"),
+
+  new SlashCommandBuilder()
     .setName("ajouter-carte")
     .setDescription("Ajouter carte (ADMIN)")
-    .addStringOption(o => o.setName("categorie").setRequired(true))
-    .addStringOption(o => o.setName("id").setRequired(true))
-    .addStringOption(o => o.setName("nom").setRequired(true))
-    .addStringOption(o => o.setName("image").setRequired(true)),
+    .addStringOption(o => o.setName("categorie").setDescription("Catégorie").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("ID").setRequired(true))
+    .addStringOption(o => o.setName("nom").setDescription("Nom").setRequired(true))
+    .addStringOption(o => o.setName("image").setDescription("URL image").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("donner-carte")
     .setDescription("Donner carte")
-    .addUserOption(o => o.setName("utilisateur").setRequired(true))
-    .addStringOption(o => o.setName("id").setRequired(true)),
+    .addUserOption(o => o.setName("utilisateur").setDescription("Joueur").setRequired(true))
+    .addStringOption(o => o.setName("id").setDescription("ID").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("supprimer-joueur")
-    .setDescription("Supprime TOUTES les cartes d’un joueur (ADMIN)")
-    .addUserOption(o => o.setName("utilisateur").setRequired(true))
-].map(c => c.toJSON());
+    .setDescription("Wipe cartes joueur")
+    .addUserOption(o => o.setName("utilisateur").setDescription("Joueur").setRequired(true))
+];
 
-// ================= DEPLOY =================
+const commands = commandsRaw
+  .filter(cmd => cmd && typeof cmd.toJSON === "function")
+  .map(cmd => {
+    try {
+      return cmd.toJSON();
+    } catch (e) {
+      console.log("❌ Command skipped:", e.message);
+      return null;
+    }
+  })
+  .filter(Boolean);
+
+// ================= DEPLOY SAFE =================
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-  console.log("✅ Commands OK");
+  try {
+    await rest.put(Routes.applicationCommands(CLIENT_ID), {
+      body: commands
+    });
+    console.log("✅ Commands OK");
+  } catch (e) {
+    console.log("❌ Deploy error:", e.message);
+  }
 })();
 
 // ================= READY =================
 client.once("ready", () => {
-  console.log(`🤖 Connecté : ${client.user.tag}`);
+  console.log(`🤖 ONLINE : ${client.user.tag}`);
 });
+
+// ================= HELPERS =================
+function getUser(playerId) {
+  if (!players[playerId]) players[playerId] = { cards: [], money: 0 };
+  if (!players[playerId].cards) players[playerId].cards = [];
+  if (typeof players[playerId].money !== "number") players[playerId].money = 0;
+  return players[playerId];
+}
 
 // ================= MAIN =================
 client.on("interactionCreate", async (interaction) => {
 
-  // ===== MENU =====
-  if (interaction.commandName === "cartes") {
+  try {
 
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🎮 MENU CARTES")
-          .setColor(0x3498db)
-      ],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId("cat").setLabel("📁 Catalogue").setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId("view").setLabel("🎴 Voir carte").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId("stats").setLabel("📊 Stats").setStyle(ButtonStyle.Success)
-        )
-      ],
-      ephemeral: true
-    });
-  }
-
-  // ===== BUTTONS =====
-  if (interaction.isButton()) {
-
-    if (interaction.customId === "cat") {
+    // ===== MENU =====
+    if (interaction.commandName === "cartes") {
       return interaction.reply({
         ephemeral: true,
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("🎮 MENU CARTES")
+            .setColor(0x3498db)
+        ],
         components: [
           new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId("cat_select")
-              .setPlaceholder("Choisis catégorie")
-              .addOptions(Object.keys(categories).map(c => ({
-                label: c,
-                value: c
-              })))
+            new ButtonBuilder().setCustomId("cat").setLabel("📁 Catalogue").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId("view").setLabel("🎴 Voir").setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId("stats").setLabel("📊 Stats").setStyle(ButtonStyle.Success)
           )
         ]
       });
     }
 
-    if (interaction.customId === "view") {
-      return interaction.reply({
-        ephemeral: true,
-        components: [
-          new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId("view_cat")
-              .setPlaceholder("Choisis catégorie")
-              .addOptions(Object.keys(categories).map(c => ({
-                label: c,
-                value: c
-              })))
-          )
-        ]
+    // ===== BUTTONS =====
+    if (interaction.isButton()) {
+
+      if (interaction.customId === "cat") {
+        return interaction.reply({
+          ephemeral: true,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new StringSelectMenuBuilder()
+                .setCustomId("cat_select")
+                .setPlaceholder("Catégories")
+                .addOptions(Object.keys(categories).map(c => ({
+                  label: c,
+                  value: c
+                })))
+            )
+          ]
+        });
+      }
+
+      if (interaction.customId === "stats") {
+        const total = Object.values(data).flat().length || 0;
+
+        return interaction.reply({
+          ephemeral: true,
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("📊 Stats")
+              .setColor(0x2ecc71)
+              .setDescription(`Total cartes : **${total}**`)
+          ]
+        });
+      }
+    }
+
+    // ===== CATALOGUE =====
+    if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
+
+      const cat = interaction.values?.[0];
+      const cards = data[cat] || [];
+
+      return interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle(`📁 ${cat || "?"}`)
+            .setDescription(
+              cards.length
+                ? cards.map(c => `🎴 ${c.id} - ${c.nom}`).join("\n")
+                : "Aucune carte"
+            )
+        ],
+        components: []
       });
     }
 
-    if (interaction.customId === "stats") {
+    // ===== ADD CARD SAFE =====
+    if (interaction.commandName === "ajouter-carte") {
 
-      const total = Object.values(data).flat().length;
+      if (!interaction.memberPermissions?.has("Administrator"))
+        return interaction.reply({ content: "❌ Admin only", ephemeral: true });
+
+      const cat = interaction.options.getString("categorie");
+      const id = interaction.options.getString("id");
+      const nom = interaction.options.getString("nom");
+      const image = interaction.options.getString("image");
+
+      if (!cat || !id || !nom || !image)
+        return interaction.reply({ content: "❌ Champs invalides", ephemeral: true });
+
+      if (!data[cat]) data[cat] = [];
+
+      const exists = Object.values(data).flat().some(c => c.id === id);
+      if (exists)
+        return interaction.reply({ content: "❌ ID déjà utilisé", ephemeral: true });
+
+      data[cat].push({
+        id,
+        nom,
+        image,
+        rarity: categories[cat] || "commun"
+      });
+
+      saveJSON("./data.json", data);
+
+      return interaction.reply({ content: `✅ Ajouté ${id}`, ephemeral: true });
+    }
+
+    // ===== DONNER =====
+    if (interaction.commandName === "donner-carte") {
+
+      const user = interaction.options.getUser("utilisateur");
+      const id = interaction.options.getString("id");
+
+      const p = getUser(user.id);
+
+      if (!p.cards.includes(id))
+        p.cards.push(id);
+
+      saveJSON("./players.json", players);
+
+      return interaction.reply({ content: `🎁 Donné ${id}`, ephemeral: true });
+    }
+
+    // ===== WIPE =====
+    if (interaction.commandName === "supprimer-joueur") {
+
+      if (!interaction.memberPermissions?.has("Administrator"))
+        return interaction.reply({ content: "❌ Admin only", ephemeral: true });
+
+      const user = interaction.options.getUser("utilisateur");
+
+      players[user.id] = { cards: [], money: 0 };
+      saveJSON("./players.json", players);
+
+      return interaction.reply({
+        content: `🗑️ Wipe terminé pour ${user.username}`,
+        ephemeral: true
+      });
+    }
+
+    // ===== MES CARTES =====
+    if (interaction.commandName === "mes-cartes") {
+
+      const p = getUser(interaction.user.id);
 
       return interaction.reply({
         ephemeral: true,
         embeds: [
           new EmbedBuilder()
-            .setTitle("📊 Stats cartes")
-            .setColor(0x2ecc71)
-            .setDescription(`Total cartes : **${total}**`)
+            .setTitle("📚 Tes cartes")
+            .setDescription(p.cards.length ? p.cards.join("\n") : "Aucune carte")
         ]
       });
     }
-  }
 
-  // ===== CATALOGUE (GRID STYLE CLEAN) =====
-  if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
+    // ===== SAFE CATCH =====
+  } catch (err) {
+    console.log("❌ Interaction error:", err);
 
-    const cat = interaction.values[0];
-    const cards = data[cat] || [];
-
-    return interaction.update({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`📁 ${cat.toUpperCase()}`)
-          .setColor(0x3498db)
-          .setDescription(
-            cards.length
-              ? cards.map(c => {
-                  const r = rarityStyle[c.rarity] || rarityStyle.commun;
-                  return `${r.emoji} **${c.id}** - ${c.nom}`;
-                }).join("\n")
-              : "Aucune carte"
-          )
-      ],
-      components: []
-    });
-  }
-
-  // ===== VIEW SELECT CATEGORY =====
-  if (interaction.isStringSelectMenu() && interaction.customId === "view_cat") {
-
-    const cat = interaction.values[0];
-    const cards = data[cat] || [];
-
-    if (!cards.length)
-      return interaction.reply({ content: "❌ Aucune carte", ephemeral: true });
-
-    return interaction.update({
-      components: [
-        new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId(`view_card_${cat}`)
-            .setPlaceholder("Choisis carte")
-            .addOptions(cards.map(c => ({
-              label: c.id,
-              value: c.id,
-              description: c.nom
-            })))
-        )
-      ]
-    });
-  }
-
-  // ===== VIEW CARD =====
-  if (interaction.isStringSelectMenu() && interaction.customId.startsWith("view_card_")) {
-
-    const cat = interaction.customId.replace("view_card_", "");
-    const id = interaction.values[0];
-
-    const card = (data[cat] || []).find(c => c.id === id);
-    if (!card)
-      return interaction.update({ content: "❌ Carte introuvable", components: [] });
-
-    const style = rarityStyle[card.rarity] || rarityStyle.commun;
-
-    return interaction.update({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`${style.emoji} ${card.id} - ${card.nom}`)
-          .setColor(style.color)
-          .setImage(card.image)
-          .setFooter({ text: `Rareté: ${card.rarity}` })
-      ],
-      components: []
-    });
-  }
-
-  // ===== AJOUT =====
-  if (interaction.commandName === "ajouter-carte") {
-
-    if (!interaction.memberPermissions?.has("Administrator"))
-      return interaction.reply({ content: "❌ Admin only", ephemeral: true });
-
-    const cat = interaction.options.getString("categorie");
-    const id = interaction.options.getString("id");
-    const nom = interaction.options.getString("nom");
-    const image = interaction.options.getString("image");
-
-    if (!data[cat]) data[cat] = [];
-
-    const exists = Object.values(data).flat().some(c => c.id === id);
-    if (exists)
-      return interaction.reply({ content: "❌ ID déjà utilisé", ephemeral: true });
-
-    data[cat].push({
-      id,
-      nom,
-      image,
-      rarity: categories[cat] || "commun"
-    });
-
-    saveData();
+    if (interaction.replied || interaction.deferred) return;
 
     return interaction.reply({
-      content: `✅ Carte ajoutée : ${id}`,
-      ephemeral: true
-    });
-  }
-
-  // ===== DONNER =====
-  if (interaction.commandName === "donner-carte") {
-
-    const user = interaction.options.getUser("utilisateur");
-    const id = interaction.options.getString("id");
-
-    if (!players[user.id]) players[user.id] = { cards: [] };
-
-    if (!players[user.id].cards.includes(id))
-      players[user.id].cards.push(id);
-
-    savePlayers();
-
-    return interaction.reply({
-      content: `🎁 Carte donnée : ${id}`,
-      ephemeral: true
-    });
-  }
-
-  // ===== SUPPRIMER JOUEUR =====
-  if (interaction.commandName === "supprimer-joueur") {
-
-    if (!interaction.memberPermissions?.has("Administrator"))
-      return interaction.reply({ content: "❌ Admin only", ephemeral: true });
-
-    const user = interaction.options.getUser("utilisateur");
-
-    players[user.id] = { cards: [] };
-    savePlayers();
-
-    return interaction.reply({
-      content: `🗑️ Toutes les cartes supprimées pour ${user.username}`,
-      ephemeral: true
-    });
-  }
-
-  // ===== MES CARTES =====
-  if (interaction.commandName === "mes-cartes") {
-
-    const cards = players[interaction.user.id]?.cards || [];
-
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("📚 Tes cartes")
-          .setColor(0x9b59b6)
-          .setDescription(cards.length ? cards.join("\n") : "Aucune carte")
-      ],
-      ephemeral: true
-    });
-  }
-
-  // ===== STATS =====
-  if (interaction.commandName === "stats-cartes") {
-
-    const total = Object.values(data).flat().length;
-
-    return interaction.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("📊 Stats cartes")
-          .setColor(0x2ecc71)
-          .setDescription(`Total cartes : **${total}**`)
-      ],
+      content: "❌ Une erreur est survenue (safe mode activé)",
       ephemeral: true
     });
   }
 });
 
-client.login(TOKEN);
+client.login(TOKEN); 
