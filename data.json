@@ -1,6 +1,17 @@
 {
-  "civil": [
-    { "id": 101, "url": "https://example.com/civil1.jpg" }
-  ],
-  "militaire": []
+  "civil": [],
+  "metier": [],
+  "faction": [],
+  "militaire": [],
+  "gouvernement": [],
+  "justice": [],
+  "evenements_top1": [],
+  "prisonnier": [],
+  "symbolique": [],
+  "top_secret": [],
+  "zombie": [],
+  "ville_village": [],
+  "admi": [],
+  "fondateur": [],
+  "fondatrice": []
 }
