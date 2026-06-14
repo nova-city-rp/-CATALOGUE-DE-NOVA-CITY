@@ -33,13 +33,11 @@ let players = fs.existsSync("./players.json")
   ? JSON.parse(fs.readFileSync("./players.json"))
   : {};
 
-function saveData() {
+const saveData = () =>
   fs.writeFileSync("./data.json", JSON.stringify(data, null, 2));
-}
 
-function savePlayers() {
+const savePlayers = () =>
   fs.writeFileSync("./players.json", JSON.stringify(players, null, 2));
-}
 
 // ================= CATEGORIES =================
 const categories = {
@@ -60,7 +58,7 @@ const categories = {
   fondatrice: "royal"
 };
 
-// ================= COMMANDS =================
+// ================= COMMANDES =================
 const commands = [
   new SlashCommandBuilder()
     .setName("cartes")
@@ -70,10 +68,14 @@ const commands = [
     .setName("donner-carte")
     .setDescription("🎁 Donner une carte")
     .addUserOption(o =>
-      o.setName("utilisateur").setRequired(true)
+      o.setName("utilisateur")
+        .setDescription("Joueur")
+        .setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id").setRequired(true)
+      o.setName("id")
+        .setDescription("ID carte (CIV-001)")
+        .setRequired(true)
     )
 ].map(c => c.toJSON());
 
@@ -84,18 +86,18 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), {
     body: commands
   });
-  console.log("✅ Commands OK");
+  console.log("✅ Slash commands OK");
 })();
 
 // ================= READY =================
 client.once("ready", () => {
-  console.log(`🤖 Connecté ${client.user.tag}`);
+  console.log(`🤖 Connecté : ${client.user.tag}`);
 });
 
-// ================= MAIN =================
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
 
-  // ================= /cartes =================
+  // ================= MENU PRINCIPAL =================
   if (interaction.commandName === "cartes") {
 
     const row = new ActionRowBuilder().addComponents(
@@ -106,12 +108,12 @@ client.on("interactionCreate", async (interaction) => {
 
       new ButtonBuilder()
         .setCustomId("add")
-        .setLabel("➕ Ajouter")
+        .setLabel("➕ Ajouter carte")
         .setStyle(ButtonStyle.Success),
 
       new ButtonBuilder()
         .setCustomId("view")
-        .setLabel("🎴 Voir")
+        .setLabel("🎴 Voir carte")
         .setStyle(ButtonStyle.Secondary)
     );
 
@@ -129,7 +131,7 @@ client.on("interactionCreate", async (interaction) => {
   // ================= BUTTONS =================
   if (interaction.isButton()) {
 
-    // CATALOGUE
+    // -------- CATALOGUE --------
     if (interaction.customId === "cat") {
 
       const menu = new StringSelectMenuBuilder()
@@ -148,7 +150,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ADD
+    // -------- AJOUT --------
     if (interaction.customId === "add") {
 
       const menu = new StringSelectMenuBuilder()
@@ -167,7 +169,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // VIEW
+    // -------- VIEW --------
     if (interaction.customId === "view") {
 
       const menu = new StringSelectMenuBuilder()
@@ -222,7 +224,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`view_card_${cat}`)
-      .setPlaceholder("Choisis carte")
+      .setPlaceholder("Choisis une carte")
       .addOptions(
         cards.map(c => ({
           label: c.id,
@@ -242,6 +244,13 @@ client.on("interactionCreate", async (interaction) => {
     const id = interaction.values[0];
 
     const card = (data[cat] || []).find(c => c.id === id);
+
+    if (!card) {
+      return interaction.update({
+        content: "Carte introuvable",
+        components: []
+      });
+    }
 
     const file = new AttachmentBuilder(card.file);
 
@@ -274,7 +283,7 @@ client.on("interactionCreate", async (interaction) => {
 
     const urlInput = new TextInputBuilder()
       .setCustomId("url")
-      .setLabel("Lien image Discord")
+      .setLabel("URL image Discord")
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
@@ -304,7 +313,7 @@ client.on("interactionCreate", async (interaction) => {
     saveData();
 
     return interaction.reply({
-      content: "Carte ajoutée ✅",
+      content: `Carte ajoutée : ${id}`,
       ephemeral: true
     });
   }
@@ -318,6 +327,7 @@ client.on("interactionCreate", async (interaction) => {
     if (!players[user.id]) players[user.id] = { cards: [] };
 
     players[user.id].cards.push(id);
+
     savePlayers();
 
     return interaction.reply({
