@@ -7,6 +7,8 @@ const {
   Routes,
   EmbedBuilder,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   StringSelectMenuBuilder,
   AttachmentBuilder
 } = require("discord.js");
@@ -30,12 +32,35 @@ function savePlayers() {
   fs.writeFileSync("./players.json", JSON.stringify(players, null, 2));
 }
 
-// ===================== COMMANDS =====================
+// ===================== CATÉGORIES + RARETÉ =====================
+const categories = {
+  civil: "commun",
+  metier: "rare",
+  faction: "epic",
+  militaire: "epic",
+  gouvernement: "epic",
+  justice: "epic",
+  evenements_top1: "epic",
+  prisonnier: "unique",
+  symbolique: "unique",
+  top_secret: "elite",
+  zombie: "erudit",
+  ville_village: "erudit",
+  admi: "legendaire",
+  fondateur: "royal",
+  fondatrice: "royal"
+};
+
+// ===================== COMMANDES =====================
 const commands = [
 
   new SlashCommandBuilder()
+    .setName("cartes")
+    .setDescription("🎮 Menu principal cartes"),
+
+  new SlashCommandBuilder()
     .setName("catalogue")
-    .setDescription("📁 Voir les catégories de cartes"),
+    .setDescription("📁 Voir les catégories"),
 
   new SlashCommandBuilder()
     .setName("voir-carte")
@@ -44,7 +69,7 @@ const commands = [
       o.setName("categorie").setDescription("Catégorie").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id").setDescription("ID carte (ex: CIV-001)").setRequired(true)
+      o.setName("id").setDescription("ID (CIV-001)").setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -52,9 +77,6 @@ const commands = [
     .setDescription("➕ Ajouter une carte (ADMIN)")
     .addStringOption(o =>
       o.setName("categorie").setDescription("Catégorie").setRequired(true)
-    )
-    .addStringOption(o =>
-      o.setName("rarity").setDescription("commun / rare / epique / legendaire").setRequired(true)
     )
     .addAttachmentOption(o =>
       o.setName("image").setDescription("Image de la carte").setRequired(true)
@@ -88,28 +110,33 @@ client.once("ready", () => {
   console.log(`🤖 Connecté : ${client.user.tag}`);
 });
 
-// ===================== INTERACTIONS =====================
+// ===================== MENU PRINCIPAL =====================
 client.on("interactionCreate", async (interaction) => {
 
-  // ===================== /CATALOGUE =====================
-  if (interaction.commandName === "catalogue") {
+  if (interaction.commandName === "cartes") {
 
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId("menu_cat")
-      .setPlaceholder("📁 Choisis une catégorie")
-      .addOptions(
-        Object.keys(data).map(c => ({
-          label: `${c.toUpperCase()} (${data[c].length})`,
-          value: c
-        }))
-      );
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("cat")
+        .setLabel("📁 Catalogue")
+        .setStyle(ButtonStyle.Primary),
 
-    const row = new ActionRowBuilder().addComponents(menu);
+      new ButtonBuilder()
+        .setCustomId("add")
+        .setLabel("➕ Ajouter carte")
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId("view")
+        .setLabel("🎴 Voir carte")
+        .setStyle(ButtonStyle.Secondary)
+    );
 
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle("📁 Catalogue des cartes")
+          .setTitle("🎮 MENU CARTES")
+          .setDescription("Choisis une action")
           .setColor("Blue")
       ],
       components: [row],
@@ -117,8 +144,45 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // ===================== BUTTONS =====================
+  if (interaction.isButton()) {
+
+    if (interaction.customId === "cat") {
+
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId("menu_cat")
+        .setPlaceholder("Choisis une catégorie")
+        .addOptions(
+          Object.keys(categories).map(c => ({
+            label: c.toUpperCase(),
+            value: c
+          }))
+        );
+
+      return interaction.reply({
+        content: "📁 Catégories :",
+        components: [new ActionRowBuilder().addComponents(menu)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.customId === "add") {
+      return interaction.reply({
+        content: "Utilise `/ajouter-carte` pour ajouter une carte",
+        ephemeral: true
+      });
+    }
+
+    if (interaction.customId === "view") {
+      return interaction.reply({
+        content: "Utilise `/voir-carte` pour voir une carte",
+        ephemeral: true
+      });
+    }
+  }
+
   // ===================== MENU CAT =====================
-  if (interaction.isStringSelectMenu() && interaction.customId === "menu_cat") {
+  if (interaction.isStringSelectMenu()) {
 
     const cat = interaction.values[0];
     const cards = data[cat] || [];
@@ -127,7 +191,11 @@ client.on("interactionCreate", async (interaction) => {
       embeds: [
         new EmbedBuilder()
           .setTitle(`📁 ${cat.toUpperCase()}`)
-          .setDescription(cards.map(c => `🎴 ${c.id} - ${c.rarity}`).join("\n"))
+          .setDescription(
+            cards.length
+              ? cards.map(c => `🎴 ${c.id} (${c.rarity})`).join("\n")
+              : "❌ Aucune carte"
+          )
           .setColor("Green")
       ],
       components: []
@@ -151,10 +219,10 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle(`🎴 ${card.id}`)
+          .setTitle(card.id)
           .setImage(`attachment://${card.file}`)
-          .setColor("Gold")
           .setFooter({ text: `Rareté : ${card.rarity}` })
+          .setColor("Gold")
       ],
       files: [file],
       ephemeral: true
@@ -169,10 +237,11 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const cat = interaction.options.getString("categorie");
-    const rarity = interaction.options.getString("rarity");
     const image = interaction.options.getAttachment("image");
 
     if (!data[cat]) data[cat] = [];
+
+    const rarity = categories[cat] || "commun";
 
     const id = `${cat.toUpperCase().slice(0,3)}-${String(data[cat].length + 1).padStart(3, "0")}`;
 
@@ -208,9 +277,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (!players[user.id]) players[user.id] = { cards: [] };
 
-    if (!players[user.id].cards.includes(id)) {
-      players[user.id].cards.push(id);
-    }
+    players[user.id].cards.push(id);
 
     savePlayers();
 
