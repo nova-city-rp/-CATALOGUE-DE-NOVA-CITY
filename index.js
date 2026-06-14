@@ -10,10 +10,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
-  AttachmentBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle
+  AttachmentBuilder
 } = require("discord.js");
 
 // ================= CONFIG =================
@@ -21,7 +18,11 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 // ================= DATA =================
@@ -58,7 +59,7 @@ const categories = {
   fondatrice: "royal"
 };
 
-// ================= COMMANDES =================
+// ================= COMMANDS =================
 const commands = [
   new SlashCommandBuilder()
     .setName("cartes")
@@ -68,14 +69,10 @@ const commands = [
     .setName("donner-carte")
     .setDescription("🎁 Donner une carte")
     .addUserOption(o =>
-      o.setName("utilisateur")
-        .setDescription("Joueur")
-        .setRequired(true)
+      o.setName("utilisateur").setDescription("Joueur").setRequired(true)
     )
     .addStringOption(o =>
-      o.setName("id")
-        .setDescription("ID carte (CIV-001)")
-        .setRequired(true)
+      o.setName("id").setDescription("ID carte").setRequired(true)
     )
 ].map(c => c.toJSON());
 
@@ -86,7 +83,7 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
   await rest.put(Routes.applicationCommands(CLIENT_ID), {
     body: commands
   });
-  console.log("✅ Slash commands OK");
+  console.log("✅ Commands OK");
 })();
 
 // ================= READY =================
@@ -97,7 +94,7 @@ client.once("ready", () => {
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
 
-  // ================= MENU PRINCIPAL =================
+  // ========== MENU ==========
   if (interaction.commandName === "cartes") {
 
     const row = new ActionRowBuilder().addComponents(
@@ -128,33 +125,14 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ================= BUTTONS =================
+  // ========== BUTTONS ==========
   if (interaction.isButton()) {
 
-    // -------- CATALOGUE --------
+    // CATALOGUE
     if (interaction.customId === "cat") {
 
       const menu = new StringSelectMenuBuilder()
         .setCustomId("cat_select")
-        .setPlaceholder("Choisis une catégorie")
-        .addOptions(
-          Object.keys(categories).map(c => ({
-            label: c,
-            value: c
-          }))
-        );
-
-      return interaction.reply({
-        components: [new ActionRowBuilder().addComponents(menu)],
-        ephemeral: true
-      });
-    }
-
-    // -------- AJOUT --------
-    if (interaction.customId === "add") {
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId("add_cat")
         .setPlaceholder("Choisis catégorie")
         .addOptions(
           Object.keys(categories).map(c => ({
@@ -169,7 +147,27 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // -------- VIEW --------
+    // AJOUT CARTE
+    if (interaction.customId === "add") {
+
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId("add_cat")
+        .setPlaceholder("Choisis catégorie")
+        .addOptions(
+          Object.keys(categories).map(c => ({
+            label: c,
+            value: c
+          }))
+        );
+
+      return interaction.reply({
+        content: "📁 Choisis une catégorie puis envoie : IMAGE + ID (ex: CIV-001)",
+        components: [new ActionRowBuilder().addComponents(menu)],
+        ephemeral: true
+      });
+    }
+
+    // VIEW
     if (interaction.customId === "view") {
 
       const menu = new StringSelectMenuBuilder()
@@ -189,7 +187,56 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // ================= CAT LIST =================
+  // ========== SELECT CATEGORIE ADD ==========
+  if (interaction.isStringSelectMenu() && interaction.customId === "add_cat") {
+
+    const cat = interaction.values[0];
+
+    players[interaction.user.id] = {
+      pendingAdd: cat
+    };
+
+    savePlayers();
+
+    return interaction.reply({
+      content: "📤 Envoie maintenant UNE IMAGE + ID dans le chat (ex: CIV-001)",
+      ephemeral: true
+    });
+  }
+
+  // ========== MESSAGE UPLOAD ==========
+  client.on("messageCreate", async (message) => {
+
+    if (message.author.bot) return;
+
+    const userData = players[message.author.id];
+    if (!userData?.pendingAdd) return;
+
+    const cat = userData.pendingAdd;
+
+    const attachment = message.attachments.first();
+    if (!attachment) return;
+
+    const id = message.content.trim();
+    if (!id) return;
+
+    if (!data[cat]) data[cat] = [];
+
+    data[cat].push({
+      id,
+      rarity: categories[cat] || "commun",
+      file: attachment.url
+    });
+
+    saveData();
+
+    delete players[message.author.id].pendingAdd;
+    savePlayers();
+
+    message.reply(`✅ Carte ajoutée : ${id}`);
+  });
+
+  // ========== CATALOGUE ==========
   if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
 
     const cat = interaction.values[0];
@@ -209,22 +256,15 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ================= VIEW STEP 1 =================
+  // ========== VIEW ==========
   if (interaction.isStringSelectMenu() && interaction.customId === "view_cat") {
 
     const cat = interaction.values[0];
     const cards = data[cat] || [];
 
-    if (!cards.length) {
-      return interaction.update({
-        content: "Aucune carte",
-        components: []
-      });
-    }
-
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`view_card_${cat}`)
-      .setPlaceholder("Choisis une carte")
+      .setPlaceholder("Choisis carte")
       .addOptions(
         cards.map(c => ({
           label: c.id,
@@ -237,20 +277,12 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // ================= VIEW STEP 2 =================
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith("view_card_")) {
 
     const cat = interaction.customId.replace("view_card_", "");
     const id = interaction.values[0];
 
     const card = (data[cat] || []).find(c => c.id === id);
-
-    if (!card) {
-      return interaction.update({
-        content: "Carte introuvable",
-        components: []
-      });
-    }
 
     const file = new AttachmentBuilder(card.file);
 
@@ -265,76 +297,26 @@ client.on("interactionCreate", async (interaction) => {
       components: []
     });
   }
+});
 
-  // ================= ADD STEP =================
-  if (interaction.isStringSelectMenu() && interaction.customId === "add_cat") {
+// ================= DONNER =================
+client.on("interactionCreate", async (interaction) => {
 
-    const cat = interaction.values[0];
+  if (interaction.commandName !== "donner-carte") return;
 
-    const modal = new ModalBuilder()
-      .setCustomId(`add_${cat}`)
-      .setTitle("Ajouter carte");
+  const user = interaction.options.getUser("utilisateur");
+  const id = interaction.options.getString("id");
 
-    const idInput = new TextInputBuilder()
-      .setCustomId("id")
-      .setLabel("ID carte (CIV-001)")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
+  if (!players[user.id]) players[user.id] = { cards: [] };
 
-    const urlInput = new TextInputBuilder()
-      .setCustomId("url")
-      .setLabel("URL image Discord")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
+  players[user.id].cards.push(id);
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(idInput),
-      new ActionRowBuilder().addComponents(urlInput)
-    );
+  savePlayers();
 
-    return interaction.showModal(modal);
-  }
-
-  // ================= MODAL =================
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("add_")) {
-
-    const cat = interaction.customId.replace("add_", "");
-    const id = interaction.fields.getTextInputValue("id");
-    const url = interaction.fields.getTextInputValue("url");
-
-    if (!data[cat]) data[cat] = [];
-
-    data[cat].push({
-      id,
-      rarity: categories[cat] || "commun",
-      file: url
-    });
-
-    saveData();
-
-    return interaction.reply({
-      content: `Carte ajoutée : ${id}`,
-      ephemeral: true
-    });
-  }
-
-  // ================= DONNER =================
-  if (interaction.commandName === "donner-carte") {
-
-    const user = interaction.options.getUser("utilisateur");
-    const id = interaction.options.getString("id");
-
-    if (!players[user.id]) players[user.id] = { cards: [] };
-
-    players[user.id].cards.push(id);
-
-    savePlayers();
-
-    return interaction.reply({
-      content: `Carte ${id} donnée à ${user.username}`,
-      ephemeral: true
-    });
-  }
+  return interaction.reply({
+    content: `🎁 Carte ${id} donnée à ${user.username}`,
+    ephemeral: true
+  });
 });
 
 client.login(TOKEN);
