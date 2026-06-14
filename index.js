@@ -50,7 +50,7 @@ const categories = {
   top_secret: "elite",
   zombie: "erudit",
   ville_village: "erudit",
-  admi: "legendaire",
+  admin: "legendaire",
   fondateur: "royal",
   fondatrice: "royal"
 };
