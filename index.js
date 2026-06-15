@@ -87,6 +87,11 @@ const commands = [
   new SlashCommandBuilder()
     .setName("mes-cartes")
     .setDescription("Voir votre collection de cartes"),
+
+  new SlashCommandBuilder()
+    .setName("voir-carte")
+    .setDescription("Afficher une carte en grand avec son illustration")
+    .addStringOption(o => o.setName("id").setDescription("L'ID unique de la carte à regarder").setRequired(true)),
     
   new SlashCommandBuilder()
     .setName("stats-cartes")
@@ -102,7 +107,6 @@ const commands = [
     .addUserOption(o => o.setName("utilisateur").setDescription("Le joueur à qui retirer la carte").setRequired(true))
     .addStringOption(o => o.setName("id").setDescription("L'identifiant unique de la carte").setRequired(true)),
 
-  // ICI : Modification de l'option image pour accepter directement un fichier !
   new SlashCommandBuilder()
     .setName("ajouter-carte")
     .setDescription("Créer une nouvelle carte dans le système (ADMIN)")
@@ -138,6 +142,14 @@ function getUser(id) {
   return players[id];
 }
 
+function findCard(cardId) {
+  for (const cat of Object.keys(data)) {
+    const card = data[cat].find(c => c.id.toLowerCase() === cardId.toLowerCase());
+    if (card) return { card, cat };
+  }
+  return null;
+}
+
 // ================= MAIN =================
 client.on("interactionCreate", async (interaction) => {
   try {
@@ -150,7 +162,7 @@ client.on("interactionCreate", async (interaction) => {
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId("cat").setLabel("📁 Catalogue").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("view").setLabel("🎴 Voir carte").setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId("view_help").setLabel("🎴 Comment voir une carte ?").setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId("stats").setLabel("📊 Stats").setStyle(ButtonStyle.Success)
           )
         ]
@@ -179,9 +191,9 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      if (interaction.customId === "view") {
+      if (interaction.customId === "view_help") {
         return interaction.reply({
-          content: "💡 Pour voir vos cartes détaillées, utilisez plutôt la commande `/mes-cartes` !",
+          content: "💡 Pour inspecter une carte avec son illustration en grand, utilise la commande : `/voir-carte id:ID_DE_LA_CARTE` !",
           ephemeral: true
         });
       }
@@ -200,7 +212,7 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    // ===== CATALOGUE SIMPLE =====
+    // ===== CATALOGUE SIMPLE PAR CATEGORIE =====
     if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
       const cat = interaction.values[0];
       const cards = data[cat] || [];
@@ -224,7 +236,31 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===== GLOBAL CATALOGUE =====
+    // ===== COMMAND: VOIR UNE CARTE EN ENTIER (IMAGE GRANDE) =====
+    if (interaction.isChatInputCommand() && interaction.commandName === "voir-carte") {
+      const id = interaction.options.getString("id");
+      const result = findCard(id);
+
+      if (!result) {
+        return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas.`, ephemeral: true });
+      }
+
+      const { card, cat } = result;
+      const r = rarityStyle[card.rarity] || rarityStyle.commun;
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${r.emoji} ${card.nom} [${card.id.toUpperCase()}]`)
+        .addFields(
+          { name: "📁 Catégorie", value: cat.toUpperCase(), inline: true },
+          { name: "💎 Rareté", value: card.rarity.toUpperCase(), inline: true }
+        )
+        .setColor(r.color)
+        .setImage(card.image); // Affiche la photo EN GRAND et EN ENTIER !
+
+      return interaction.reply({ embeds: [embed], ephemeral: false });
+    }
+
+    // ===== GLOBAL CATALOGUE (AVEC LIENS ET LISTE PROPRE) =====
     if (interaction.isChatInputCommand() && interaction.commandName === "catalogueglobale") {
       const all = Object.values(data).flat();
 
@@ -233,17 +269,14 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const embed = new EmbedBuilder()
-        .setTitle("🌍 CATALOGUE GLOBAL")
+        .setTitle("🌍 CATALOGUE GLOBAL DES CARTES")
+        .setDescription("Utilisez `/voir-carte` suivi de l'ID pour voir l'illustration d'une carte en grand !\n\n" + 
+          all.map(card => {
+            const r = rarityStyle[card.rarity] || rarityStyle.commun;
+            return `${r.emoji} **${card.id}** - ${card.nom} *(${card.rarity})*`;
+          }).join("\n")
+        )
         .setColor(0x5865f2);
-
-      all.slice(0, 25).forEach(card => {
-        const r = rarityStyle[card.rarity] || rarityStyle.commun;
-        embed.addFields({
-          name: `${r.emoji} ${card.id}`,
-          value: `**Nom:** ${card.nom}\n[Lien Image](${card.image})`,
-          inline: true
-        });
-      });
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
@@ -255,11 +288,11 @@ client.on("interactionCreate", async (interaction) => {
 
       const p = getUser(user.id);
       
-      if (!p.cards.includes(id)) {
+      if (!p.cards.some(c => c.toLowerCase() === id.toLowerCase())) {
         return interaction.reply({ content: `❌ Cet utilisateur ne possède pas la carte **${id}**.`, ephemeral: true });
       }
 
-      p.cards = p.cards.filter(c => c !== id);
+      p.cards = p.cards.filter(c => c.toLowerCase() !== id.toLowerCase());
       saveJSON(PLAYERS_FILE, players);
 
       return interaction.reply({
@@ -278,7 +311,7 @@ client.on("interactionCreate", async (interaction) => {
           new EmbedBuilder()
             .setTitle("📚 Tes cartes")
             .setColor(0x9b59b6)
-            .setDescription(p.cards.length ? p.cards.map(c => `• **${c}**`).join("\n") : "Encore aucune carte dans ta collection ! 😢")
+            .setDescription(p.cards.length ? p.cards.map(c => `• **${c.toUpperCase()}**`).join("\n") : "Encore aucune carte dans ta collection ! 😢")
         ]
       });
     }
@@ -292,7 +325,6 @@ client.on("interactionCreate", async (interaction) => {
       const id = interaction.options.getString("id");
       const nom = interaction.options.getString("nom");
       
-      // On récupère l'URL directement depuis le fichier envoyé !
       const imageAttachment = interaction.options.getAttachment("image");
       const image = imageAttachment ? imageAttachment.url : null;
 
@@ -306,7 +338,7 @@ client.on("interactionCreate", async (interaction) => {
 
       if (!data[cat]) data[cat] = [];
 
-      const exists = Object.values(data).flat().some(c => c.id === id);
+      const exists = Object.values(data).flat().some(c => c.id.toLowerCase() === id.toLowerCase());
       if (exists)
         return interaction.reply({ content: "❌ Cet ID de carte est déjà utilisé !", ephemeral: true });
 
@@ -326,13 +358,13 @@ client.on("interactionCreate", async (interaction) => {
       const user = interaction.options.getUser("utilisateur");
       const id = interaction.options.getString("id");
 
-      const cardExists = Object.values(data).flat().some(c => c.id === id);
-      if (!cardExists) {
+      const result = findCard(id);
+      if (!result) {
         return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas dans le système.`, ephemeral: true });
       }
 
       const p = getUser(user.id);
-      if (p.cards.includes(id)) {
+      if (p.cards.some(c => c.toLowerCase() === id.toLowerCase())) {
         return interaction.reply({ content: `⚠️ Cet utilisateur possède déjà la carte **${id}**.`, ephemeral: true });
       }
 
@@ -374,4 +406,4 @@ if (!TOKEN || !CLIENT_ID) {
   process.exit(1);
 } else {
   client.login(TOKEN);
-              }
+}
