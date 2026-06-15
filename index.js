@@ -122,16 +122,15 @@ const commands = [
     .addStringOption(o => o.setName("id").setDescription("L'identifiant unique de la carte à donner").setRequired(true)),
 ].map(c => c.toJSON());
 
-// ================= DEPLOY & LOGIN =================
+// ================= DEPLOY =================
 client.once("ready", async () => {
   console.log(`🤖 Bot connecté en tant que ${client.user.tag}`);
-  
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-    console.log("✅ Commandes Slash enregistrées avec succès auprès de Discord !");
+    console.log("✅ Commandes Slash enregistrées !");
   } catch (error) {
-    console.error("❌ Erreur lors de l'enregistrement des commandes :", error);
+    console.error("❌ Erreur de déploiement :", error);
   }
 });
 
@@ -150,11 +149,54 @@ function findCard(cardId) {
   return null;
 }
 
+// Génère la liste écrite d'une catégorie avec son menu déroulant de cartes
+function createCategoryList(cat) {
+  const cards = data[cat] || [];
+  
+  if (cards.length === 0) {
+    return {
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`📁 CATEGOUTE : ${cat.toUpperCase()}`)
+          .setDescription("Aucune carte n'est disponible dans cette catégorie pour le moment.")
+          .setColor(0x3498db)
+      ],
+      components: []
+    };
+  }
+
+  const listText = cards.map(c => {
+    const r = rarityStyle[c.rarity] || rarityStyle.commun;
+    return `${r.emoji} **${c.id.toUpperCase()}** — ${c.nom}`;
+  }).join("\n");
+
+  const embed = new EmbedBuilder()
+    .setTitle(`📁 CATEGORIE : ${cat.toUpperCase()}`)
+    .setDescription(`Voici la liste des cartes disponibles.\nCliquez sur le menu ci-dessous pour afficher la photo d'une carte !\n\n${listText}`)
+    .setColor(0x3498db);
+
+  // Création du menu déroulant contenant les cartes de la catégorie (max 25)
+  const cardOptions = cards.slice(0, 25).map(c => ({
+    label: `${c.id.toUpperCase()} - ${c.nom}`,
+    description: `Voir l'illustration de cette carte`,
+    value: `showcard_${c.id}`
+  }));
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`card_select_${cat}`)
+      .setPlaceholder("🔍 Choisissez une carte pour voir sa photo")
+      .addOptions(cardOptions)
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
 // ================= MAIN =================
 client.on("interactionCreate", async (interaction) => {
   try {
 
-    // ===== MENU =====
+    // ===== MENU PRINCIPAL =====
     if (interaction.isChatInputCommand() && interaction.commandName === "cartes") {
       return interaction.reply({
         ephemeral: true,
@@ -169,7 +211,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===== BUTTONS =====
+    // ===== BOUTONS =====
     if (interaction.isButton()) {
       if (interaction.customId === "cat") {
         const options = Object.keys(categories).slice(0, 25).map(c => ({
@@ -210,33 +252,66 @@ client.on("interactionCreate", async (interaction) => {
           ]
         });
       }
+
+      // Bouton Retour à la liste écrite
+      if (interaction.customId.startsWith("backtolist_")) {
+        const cat = interaction.customId.split("_")[1];
+        const listData = createCategoryList(cat);
+        return interaction.update({
+          embeds: listData.embeds,
+          components: listData.components
+        });
+      }
     }
 
-    // ===== CATALOGUE SIMPLE PAR CATEGORIE =====
-    if (interaction.isStringSelectMenu() && interaction.customId === "cat_select") {
-      const cat = interaction.values[0];
-      const cards = data[cat] || [];
+    // ===== MENUS DÉROULANTS =====
+    if (interaction.isStringSelectMenu()) {
+      
+      // 1. Choix de la catégorie générale
+      if (interaction.customId === "cat_select") {
+        const cat = interaction.values[0];
+        const listData = createCategoryList(cat);
 
-      return interaction.update({
-        content: null,
-        embeds: [
-          new EmbedBuilder()
-            .setTitle(`📁 ${cat.toUpperCase()}`)
-            .setColor(0x3498db)
-            .setDescription(
-              cards.length
-                ? cards.map(c => {
-                    const r = rarityStyle[c.rarity] || rarityStyle.commun;
-                    return `${r.emoji} **${c.id}** - ${c.nom}`;
-                  }).join("\n")
-                : "Aucune carte dans cette catégorie."
-            )
-        ],
-        components: []
-      });
+        return interaction.update({
+          content: null,
+          embeds: listData.embeds,
+          components: listData.components
+        });
+      }
+
+      // 2. Choix d'une carte précise dans la catégorie pour voir sa photo
+      if (interaction.customId.startsWith("card_select_")) {
+        const cat = interaction.customId.split("_")[2];
+        const selectValue = interaction.values[0]; // ex: showcard_civ-01
+        const cardId = selectValue.split("_")[1];
+
+        const result = findCard(cardId);
+        if (!result) return interaction.update({ content: "❌ Carte introuvable.", embeds: [], components: [] });
+
+        const { card } = result;
+        const r = rarityStyle[card.rarity] || rarityStyle.commun;
+
+        const embed = new EmbedBuilder()
+          .setTitle(`${r.emoji} ${card.nom} [${card.id.toUpperCase()}]`)
+          .setDescription(`• **Catégorie :** ${cat.toUpperCase()}\n• **Rareté :** ${card.rarity.toUpperCase()}`)
+          .setColor(r.color)
+          .setImage(card.image); // Affiche la photo !
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`backtolist_${cat}`)
+            .setLabel("⬅️ Revenir à la liste")
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+        return interaction.update({
+          embeds: [embed],
+          components: [row]
+        });
+      }
     }
 
-    // ===== COMMAND: VOIR UNE CARTE EN ENTIER (IMAGE GRANDE) =====
+    // ===== COMMAND: VOIR UNE CARTE =====
     if (interaction.isChatInputCommand() && interaction.commandName === "voir-carte") {
       const id = interaction.options.getString("id");
       const result = findCard(id);
@@ -255,12 +330,12 @@ client.on("interactionCreate", async (interaction) => {
           { name: "💎 Rareté", value: card.rarity.toUpperCase(), inline: true }
         )
         .setColor(r.color)
-        .setImage(card.image); // Affiche la photo EN GRAND et EN ENTIER !
+        .setImage(card.image);
 
       return interaction.reply({ embeds: [embed], ephemeral: false });
     }
 
-    // ===== GLOBAL CATALOGUE (AVEC LIENS ET LISTE PROPRE) =====
+    // ===== GLOBAL CATALOGUE =====
     if (interaction.isChatInputCommand() && interaction.commandName === "catalogueglobale") {
       const all = Object.values(data).flat();
 
@@ -285,7 +360,6 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === "retirer-carte") {
       const user = interaction.options.getUser("utilisateur");
       const id = interaction.options.getString("id");
-
       const p = getUser(user.id);
       
       if (!p.cards.some(c => c.toLowerCase() === id.toLowerCase())) {
@@ -295,16 +369,12 @@ client.on("interactionCreate", async (interaction) => {
       p.cards = p.cards.filter(c => c.toLowerCase() !== id.toLowerCase());
       saveJSON(PLAYERS_FILE, players);
 
-      return interaction.reply({
-        content: `🗑️ Carte **${id}** retirée avec succès de <@${user.id}>.`,
-        ephemeral: true
-      });
+      return interaction.reply({ content: `🗑️ Carte **${id}** retirée avec succès de <@${user.id}>.`, ephemeral: true });
     }
 
     // ===== MES CARTES =====
     if (interaction.isChatInputCommand() && interaction.commandName === "mes-cartes") {
       const p = getUser(interaction.user.id);
-
       return interaction.reply({
         ephemeral: true,
         embeds: [
@@ -316,7 +386,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===== AJOUT AVEC FICHIER JOINT =====
+    // ===== AJOUT =====
     if (interaction.isChatInputCommand() && interaction.commandName === "ajouter-carte") {
       if (!interaction.memberPermissions?.has("Administrator"))
         return interaction.reply({ content: "❌ Seuls les administrateurs peuvent faire cela.", ephemeral: true });
@@ -329,11 +399,11 @@ client.on("interactionCreate", async (interaction) => {
       const image = imageAttachment ? imageAttachment.url : null;
 
       if (!categories[cat]) {
-        return interaction.reply({ content: `❌ Cette catégorie n'existe pas. Choisis parmi : ${Object.keys(categories).join(', ')}`, ephemeral: true });
+        return interaction.reply({ content: `❌ Cette catégorie n'existe pas.`, ephemeral: true });
       }
 
       if (!image) {
-        return interaction.reply({ content: "❌ Impossible de récupérer l'image de votre fichier.", ephemeral: true });
+        return interaction.reply({ content: "❌ Impossible de récupérer la photo.", ephemeral: true });
       }
 
       if (!data[cat]) data[cat] = [];
@@ -342,13 +412,7 @@ client.on("interactionCreate", async (interaction) => {
       if (exists)
         return interaction.reply({ content: "❌ Cet ID de carte est déjà utilisé !", ephemeral: true });
 
-      data[cat].push({
-        id,
-        nom,
-        image,
-        rarity: categories[cat] || "commun"
-      });
-
+      data[cat].push({ id, nom, image, rarity: categories[cat] || "commun" });
       saveJSON(DATA_FILE, data);
       return interaction.reply({ content: `✅ La carte **${nom}** (${id}) a été ajoutée à la catégorie **${cat}** !`, ephemeral: true });
     }
@@ -360,7 +424,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const result = findCard(id);
       if (!result) {
-        return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas dans le système.`, ephemeral: true });
+        return interaction.reply({ content: `❌ La carte avec l'ID **${id}** n'existe pas.`, ephemeral: true });
       }
 
       const p = getUser(user.id);
@@ -370,40 +434,25 @@ client.on("interactionCreate", async (interaction) => {
 
       p.cards.push(id);
       saveJSON(PLAYERS_FILE, players);
-
-      return interaction.reply({ content: `🎁 La carte **${id}** a été ajoutée à la collection de <@${user.id}> !`, ephemeral: true });
+      return interaction.reply({ content: `🎁 La carte **${id}** a été ajoutée à <@${user.id}> !`, ephemeral: true });
     }
 
-    // ===== STATS COMMANDE =====
+    // ===== STATS =====
     if (interaction.isChatInputCommand() && interaction.commandName === "stats-cartes") {
       const total = Object.values(data).flat().length;
-
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("📊 Stats")
-            .setColor(0x3498db)
-            .setDescription(`Total de cartes enregistrées: **${total}**`)
-        ],
+        embeds: [new EmbedBuilder().setTitle("📊 Stats").setColor(0x3498db).setDescription(`Total de cartes: **${total}**`)],
         ephemeral: true
       });
     }
 
   } catch (e) {
     console.error("❌ ERREUR INTERACTION :", e);
-    
-    if (!interaction.replied && !interaction.deferred) {
-      return interaction.reply({
-        content: "❌ Une erreur interne est survenue lors de l'exécution de cette action.",
-        ephemeral: true
-      });
-    }
   }
 });
 
 if (!TOKEN || !CLIENT_ID) {
-  console.error("❌ Erreur : Les variables d'environnement TOKEN ou CLIENT_ID sont introuvables !");
   process.exit(1);
 } else {
   client.login(TOKEN);
-}
+            }
